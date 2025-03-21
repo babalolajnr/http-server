@@ -4,69 +4,70 @@ use http::{Request, Response, StatusCode};
 use server::Server;
 
 pub mod http;
+pub mod router;
 pub mod server;
 
 fn main() {
     // Create a new server instance
-    let server = Server::new("127.0.0.1:8000");
+    let mut server = Server::new("127.0.0.1:8000");
+
+    // Add routes
+    server.add_route("/", handle_index);
+    server.add_route("/hello", handle_hello);
+
+    // Add middleware
+    server.add_middleware(log_middleware);
 
     // Start the server with out request handler
-    if let Err(e) = server.listen(handle_request) {
+    if let Err(e) = server.listen() {
         eprintln!("Failed to start server: {}", e);
     }
 }
 
-// This function handles HTTP requests
-fn handle_request(request: &Request) -> Response {
-    match request.method {
-        http::Method::GET => {
-            // Handle GET requests
-            let path = if request.path == "/" {
-                "/index.html"
-            } else {
-                &request.path
+/// Handles the index route by serving the `index.html` file from the `public` directory.
+///
+/// # Arguments
+///
+/// * `_request` - A reference to the incoming request.
+///
+/// # Returns
+///
+/// * `Response` - The HTTP response containing the file content or a 404 error message.
+fn handle_index(_request: &Request) -> Response {
+    let file_path = "public/index.html";
+    match fs::read(file_path) {
+        Ok(content) => {
+            let mut response = Response::new(StatusCode::OK);
+            let content_type = match Path::new(&file_path).extension().and_then(|e| e.to_str()) {
+                Some("html") => "text/html",
+                Some("css") => "text/css",
+                Some("js") => "application/javascript",
+                Some("jpg") | Some("jpeg") => "image/jpeg",
+                Some("png") => "image/png",
+                Some("gif") => "image/gif",
+                _ => "application/octet-stream",
             };
-
-            // Remove the leading `/` from the path and serve from the public directory
-            let file_path = format!("public{}", path);
-
-            // Try to read the file
-            match fs::read(&file_path) {
-                Ok(contents) => {
-                    let mut response = Response::new(StatusCode::OK);
-
-                    // Set content type based on file extensions
-                    let content_type =
-                        match Path::new(&file_path).extension().and_then(|e| e.to_str()) {
-                            Some("html") => "text/html",
-                            Some("css") => "text/css",
-                            Some("js") => "application/javascript",
-                            Some("jpg") | Some("jpeg") => "image/jpeg",
-                            Some("png") => "image/png",
-                            Some("gif") => "image/gif",
-                            _ => "application/octet-stream",
-                        };
-
-                    response.set_content_type(content_type);
-                    response.set_body(contents);
-                    response
-                }
-                Err(_) => {
-                    // File not found
-                    let mut response = Response::new(StatusCode::NotFound);
-                    response.set_content_type("text/html");
-                    response
-                        .set_body(b"<html><body><h1>404 - Not Found</h1></body></html>".to_vec());
-                    response
-                }
-            }
+            response.set_content_type(content_type);
+            response.set_body(content);
+            response
         }
-        _ => {
-            // Return 501 Not Implemented for other methods
-            let mut response = Response::new(StatusCode::NotImplemented);
-            response.set_content_type("text/plain");
-            response.set_body(b"Method not implemented".to_vec());
+        Err(_) => {
+            let mut response = Response::new(StatusCode::NotFound);
+            response.set_content_type("text/html");
+            response.set_body(b"<html><body><h1>404 - Not Found</h1></body></html>".to_vec());
             response
         }
     }
+}
+
+fn handle_hello(_request: &Request) -> Response {
+    let mut response = Response::new(StatusCode::OK);
+    response.set_content_type("text/plain");
+    response.set_body(b"Hello, world!".to_vec());
+    response
+}
+
+fn log_middleware(request: &mut Request) -> Result<(), Response> {
+    println!("Middleware: Logging request to {}", request.path);
+    Ok(())
 }

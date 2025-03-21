@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Method {
     GET,
     POST,
@@ -30,7 +30,7 @@ impl From<&str> for Method {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Version {
     HTTP1_0,
     HTTP1_1,
@@ -60,7 +60,7 @@ impl Display for Version {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Request {
     pub method: Method,
     pub path: String,
@@ -248,5 +248,29 @@ impl Response {
         response.extend_from_slice(&self.body);
 
         response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_method_from_str() {
+        assert_eq!(Method::from("GET"), Method::GET);
+        assert_eq!(Method::from("POST"), Method::POST);
+        assert_eq!(Method::from("PUT"), Method::PUT);
+        assert_eq!(Method::from("DELETE"), Method::DELETE);
+        assert_eq!(Method::from("HEAD"), Method::HEAD);
+        assert_eq!(Method::from("CONNECT"), Method::CONNECT);
+        assert_eq!(Method::from("OPTIONS"), Method::OPTIONS);
+        assert_eq!(Method::from("TRACE"), Method::TRACE);
+        assert_eq!(Method::from("PATCH"), Method::PATCH);
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid method")]
+    fn test_method_from_invalid_str() {
+        Method::from("INVALID");
     }
 }
