@@ -6,6 +6,7 @@ use server::Server;
 pub mod http;
 pub mod router;
 pub mod server;
+pub mod service;
 
 fn main() {
     // Create a new server instance
