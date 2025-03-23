@@ -67,6 +67,8 @@ pub struct Request {
     pub version: Version,
     pub headers: HashMap<String, String>,
     pub body: Vec<u8>,
+    pub params: HashMap<String, String>,
+    pub query: HashMap<String, String>,
 }
 
 impl Request {
@@ -74,42 +76,52 @@ impl Request {
     ///
     /// # Arguments
     ///
-    /// * `raw` - A byte slice containing the raw HTTP request data.
+    /// * `raw` - A byte slice containing the raw HTTP request.
     ///
     /// # Returns
     ///
-    /// * `Ok(Request)` - If the parsing is successful.
-    /// * `Err(String)` - If there is an error during parsing, with a description of the error.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// * The raw data contains invalid UTF-8 sequences.
-    /// * The request format is invalid.
-    /// * The request line is missing or malformed.
-    /// * Any of the required components (method, path, HTTP version) are missing.
+    /// A `Result` containing the parsed `Request` object or an error message.
     pub fn parse(raw: &[u8]) -> Result<Request, String> {
-        // Convert raw bytes to string allowing for partial invalid UTF-8 sequences
-        let raw_str = match std::str::from_utf8(raw) {
-            Ok(s) => s,
-            Err(_) => return Err("Invalid UTF-8 sequence".to_string()),
-        };
+        // Convert raw bytes to string, allowing for partial invalid UTF-8 sequences
+        let raw_str = String::from_utf8_lossy(raw);
 
-        // Split into head and body
+        // Split into headers and body
         let mut parts = raw_str.split("\r\n\r\n");
-        let headers_parts = parts.next().ok_or("Invalid request format")?;
-        let body_parts = parts.next().unwrap_or("");
+        let headers_part = parts.next().ok_or("Invalid request format")?;
+        let body_part = parts.next().unwrap_or("");
 
         // Parse the request line and headers
-        let mut lines = headers_parts.lines();
+        let mut lines = headers_part.lines();
         let request_line = lines.next().ok_or("Missing request line")?;
 
         let mut request_parts = request_line.split_whitespace();
         let method = request_parts.next().ok_or("Missing method")?;
-        let path = request_parts.next().ok_or("Missing path")?;
+        let path_with_query = request_parts.next().ok_or("Missing path")?;
         let version = request_parts.next().ok_or("Missing HTTP version")?;
 
-        // Parse the headers
+        // Parse path and query parameters
+        let mut query = HashMap::new();
+        let path = if let Some(q_idx) = path_with_query.find('?') {
+            let path = &path_with_query[..q_idx];
+            let query_str = &path_with_query[q_idx + 1..];
+
+            // Parse query string
+            for pair in query_str.split('&') {
+                if let Some(eq_idx) = pair.find('=') {
+                    let key = pair[..eq_idx].to_string();
+                    let value = pair[eq_idx + 1..].to_string();
+                    query.insert(key, value);
+                } else if !pair.is_empty() {
+                    query.insert(pair.to_string(), "".to_string());
+                }
+            }
+
+            path.to_string()
+        } else {
+            path_with_query.to_string()
+        };
+
+        // Parse headers
         let mut headers = HashMap::new();
         for line in lines {
             if let Some(colon_pos) = line.find(':') {
@@ -121,11 +133,21 @@ impl Request {
 
         Ok(Request {
             method: Method::from(method),
-            path: path.to_string(),
+            path,
             version: Version::from(version),
-            body: body_parts.as_bytes().to_vec(),
             headers,
+            body: body_part.as_bytes().to_vec(),
+            params: HashMap::new(), // Will be filled by the router
+            query,
         })
+    }
+
+    pub fn param(&self, key: &str) -> Option<&String> {
+        self.params.get(key)
+    }
+
+    pub fn query_param(&self, key: &str) -> Option<&String> {
+        self.query.get(key)
     }
 }
 
@@ -166,6 +188,7 @@ impl StatusCode {
     }
 }
 
+#[derive(Clone)]
 pub struct Response {
     pub version: Version,
     pub status_code: StatusCode,
@@ -187,6 +210,10 @@ impl Response {
     pub fn new(status_code: StatusCode) -> Response {
         let mut headers = HashMap::new();
         headers.insert("Server".to_string(), "RustHTTP/0.1".to_string());
+        headers.insert(
+            "Date".to_string(),
+            format!("{}", chrono::Utc::now().format("%a, %d %b %Y %H:%M:%S GMT")),
+        );
 
         Response {
             version: Version::HTTP1_1,

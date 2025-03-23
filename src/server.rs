@@ -1,83 +1,54 @@
-use std::{
-    io::{Read, Write},
-    net::{TcpListener, TcpStream},
-    sync::Arc,
-    thread,
-    time::Duration,
-};
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::thread;
+use std::time::Duration;
 
-use crate::{
-    http::{self, Request, Response, StatusCode},
-    router::{Middleware, Router},
-};
+use futures_executor::block_on;
 
-pub(crate) type RequestHandler = fn(&Request) -> Response;
+use crate::http::{Request, Response, StatusCode};
+use crate::router::Router;
+use crate::service::{Service, ServiceBuilder};
 
-pub struct Server {
+pub struct Server<S> {
     address: String,
-    router: Router,
+    service: S,
 }
 
-impl Server {
-    /// Creates a new `Server` instance with the given address.
-    ///
-    /// # Arguments
-    ///
-    /// * `address` - A string slice that holds the address to bind the server to.
-    ///
-    /// # Returns
-    ///
-    /// A new `Server` instance.
-    pub fn new(address: &str) -> Self {
+impl<S> Server<S>
+where
+    S: Service<Response = Response, Error = String> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    pub fn new(address: &str, service: S) -> Self {
         Server {
             address: address.to_string(),
-            router: Router::new(),
+            service,
         }
     }
 
-    pub fn add_route(&mut self, path: &str, handler: RequestHandler) {
-        self.router.add_route(path, handler);
-    }
-
-    pub fn add_middleware(&mut self, middleware: Middleware) {
-        self.router.add_middleware(middleware);
-    }
-
-    /// Starts the server and listens for incoming connections.
-    ///
-    /// # Arguments
-    ///
-    /// * `handler` - A function that handles incoming requests.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is `Ok` if the server starts successfully, or an `Err` with a message if it fails.
     pub fn listen(&self) -> Result<(), String> {
-        // Create a new TcpListener and bind it to the address
+        // Create a TCP listener
         let listener = TcpListener::bind(&self.address)
             .map_err(|e| format!("Failed to bind to {}: {}", self.address, e))?;
 
         println!("Server listening on {}", self.address);
 
-        // Use Arc to share router across threads safely
-        let router = Arc::new(self.router.clone());
-
-        // Accept incoming connections
+        // Accept connections and process them
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
-                    // Clone the Arc to pass to the thread
-                    let router = Arc::clone(&router);
+                    // Clone the service for each connection
+                    let mut service = self.service.clone();
 
                     // Handle each connection in a new thread
                     thread::spawn(move || {
-                        if let Err(e) = Self::handle_client(stream, router) {
+                        if let Err(e) = Self::handle_client(stream, &mut service) {
                             eprintln!("Error handling client: {}", e);
                         }
                     });
                 }
                 Err(e) => {
-                    eprintln!("Failed to establish a connection: {}", e);
+                    eprintln!("Connection failed: {}", e);
                 }
             }
         }
@@ -85,23 +56,13 @@ impl Server {
         Ok(())
     }
 
-    /// Handles an individual client connection.
-    ///
-    /// # Arguments
-    ///
-    /// * `stream` - The TCP stream representing the client connection.
-    /// * `handler` - A function that handles the request.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is `Ok` if the request is handled successfully, or an `Err` with a message if it fails.
-    fn handle_client(mut stream: TcpStream, router: Arc<Router>) -> Result<(), String> {
+    fn handle_client(mut stream: TcpStream, service: &mut S) -> Result<(), String> {
         // Set timeout to avoid hanging on slow clients
         stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
+            .set_read_timeout(Some(Duration::from_secs(30)))
             .map_err(|e| format!("Failed to set read timeout: {}", e))?;
 
-        // Buffer to store incoming data
+        // Buffer to store the incoming data
         let mut buffer = [0; 4096]; // 4KB buffer
         let mut request_data = Vec::new();
 
@@ -112,44 +73,27 @@ impl Server {
                 .map_err(|e| format!("Error reading from stream: {}", e))?;
 
             if bytes_read == 0 {
-                // Connection closed
-                break;
+                break; // Connection was closed
             }
 
             request_data.extend_from_slice(&buffer[..bytes_read]);
 
             // Check if we have a complete HTTP request
             if request_data.windows(4).any(|window| window == b"\r\n\r\n") {
-                // Found end of headers
-                // TODO: Handle chunked transfer encoding and handle content-length validation
+                // Found the end of headers
+                // For simplicity we don't handle chunked encoding or content-length validation here
                 break;
             }
 
-            if request_data.len() >= 1024 * 1024 {
+            if request_data.len() > 1024 * 1024 {
                 // 1MB limit
                 return Err("Request too large".to_string());
             }
         }
 
         // Parse the request
-        let mut request = match Request::parse(&request_data) {
-            Ok(req) => {
-                // Log the request
-                println!(
-                    "{} {}",
-                    match req.method {
-                        http::Method::GET => "GET",
-                        http::Method::POST => "POST",
-                        http::Method::PUT => "PUT",
-                        http::Method::PATCH => "PATCH",
-                        http::Method::DELETE => "DELETE",
-                        _ => "OTHER",
-                    },
-                    req.path
-                );
-
-                req
-            }
+        let request = match Request::parse(&request_data) {
+            Ok(req) => req,
             Err(e) => {
                 eprintln!("Failed to parse request: {}", e);
 
@@ -164,29 +108,38 @@ impl Server {
             }
         };
 
-        // Run middlewares
-        for middleware in &router.middleware {
-            match middleware(&mut request) {
-                Ok(_) => continue,
-                Err(response) => {
-                    stream
-                        .write_all(&response.to_bytes())
-                        .map_err(|e| format!("Failed to send response: {}", e))?;
-                    return Ok(());
-                }
+        // Make sure service is ready
+        match block_on(futures::future::poll_fn(|cx| service.poll_ready(cx))) {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("Service not ready: {}", e);
+
+                // Return a 503 Service Unavailable response
+                let mut response = Response::new(StatusCode::ServiceUnavailable);
+                response.set_content_type("text/plain");
+                response.set_body(b"Service Unavailable".to_vec());
+                stream
+                    .write_all(&response.to_bytes())
+                    .map_err(|e| format!("Failed to send response: {}", e))?;
+                return Ok(());
             }
         }
 
-        let response = match router.route(request.clone()) {
-            Some(handler) => handler(&request),
-            None => {
-                // Return a 404 Not Found response
-                let mut response = Response::new(StatusCode::NotFound);
-                response.set_content_type("text/html");
-                response.set_body(b"<html><body><h1>404 - Not Found</h1></body></html>".to_vec());
+        // Process the request through the service
+        let response_future = service.call(request);
+        let response = match block_on(response_future) {
+            Ok(response) => response,
+            Err(e) => {
+                eprintln!("Error processing request: {}", e);
+
+                // Return a 500 Internal Server Error response
+                let mut response = Response::new(StatusCode::InternalServerError);
+                response.set_content_type("text/plain");
+                response.set_body(b"Internal Server Error".to_vec());
                 response
             }
         };
+
         // Send the response back to the client
         stream
             .write_all(&response.to_bytes())
@@ -194,4 +147,18 @@ impl Server {
 
         Ok(())
     }
+}
+
+// Helper to create a server with a router and middleware
+pub fn new_server(
+    address: &str,
+    router: Router,
+) -> Server<impl Service<Response = Response, Error = String> + Send + Clone + 'static> {
+    // Create a service with middleware
+    let service = ServiceBuilder::new(router)
+        .layer(crate::middleware::LogLayer)
+        .layer(crate::middleware::CorsLayer)
+        .service();
+
+    Server::new(address, service)
 }

@@ -9,7 +9,7 @@ pub trait Service {
     /// The type of error that can occur within the service.
     type Error;
     /// The future type returned by the service.
-    type Future: Future<Output = Result<Self::Response, Self::Error>>;
+    type Future: Future<Output = Result<Self::Response, Self::Error>> + Send;
 
     /// Polls to check if the service is ready to accept a request.
     ///
@@ -53,7 +53,7 @@ pub trait Layer<S> {
 
 /// A builder for constructing a service with layers.
 pub struct ServiceBuilder<S> {
-    service: S,
+    pub service: S,
 }
 
 impl<S> ServiceBuilder<S> {
@@ -88,12 +88,7 @@ impl<S> ServiceBuilder<S> {
         }
     }
 
-    /// Builds the service.
-    ///
-    /// # Returns
-    ///
-    /// The constructed service.
-    pub fn build(self) -> S {
+    pub fn service(self) -> S {
         self.service
     }
 }
@@ -105,8 +100,8 @@ pub struct HandlerService<F> {
 
 impl<F, Fut> Service for HandlerService<F>
 where
-    F: FnMut(Request) -> Fut,
-    Fut: Future<Output = Result<Response, String>>,
+    F: FnMut(Request) -> Fut + Send,
+    Fut: Future<Output = Result<Response, String>> + Send,
 {
     type Response = Response;
     type Error = String;
@@ -150,8 +145,8 @@ where
 /// A new `HandlerService` instance.
 pub fn service_fn<F, Fut>(f: F) -> HandlerService<F>
 where
-    F: FnMut(Request) -> Fut,
-    Fut: Future<Output = Result<Response, String>>,
+    F: FnMut(Request) -> Fut + Send,
+    Fut: Future<Output = Result<Response, String>> + Send,
 {
     HandlerService { f }
 }
