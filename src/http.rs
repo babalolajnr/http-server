@@ -2,29 +2,29 @@ use std::{collections::HashMap, fmt::Display};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Method {
-    GET,
-    POST,
-    PUT,
-    DELETE,
-    HEAD,
-    CONNECT,
-    OPTIONS,
-    TRACE,
-    PATCH,
+    Get,
+    Post,
+    Put,
+    Delete,
+    Head,
+    Connect,
+    Options,
+    Trace,
+    Patch,
 }
 
 impl From<&str> for Method {
     fn from(s: &str) -> Self {
         match s.to_uppercase().as_str() {
-            "GET" => Method::GET,
-            "POST" => Method::POST,
-            "PUT" => Method::PUT,
-            "DELETE" => Method::DELETE,
-            "HEAD" => Method::HEAD,
-            "CONNECT" => Method::CONNECT,
-            "OPTIONS" => Method::OPTIONS,
-            "TRACE" => Method::TRACE,
-            "PATCH" => Method::PATCH,
+            "GET" => Method::Get,
+            "POST" => Method::Post,
+            "PUT" => Method::Put,
+            "DELETE" => Method::Delete,
+            "HEAD" => Method::Head,
+            "CONNECT" => Method::Connect,
+            "OPTIONS" => Method::Options,
+            "TRACE" => Method::Trace,
+            "PATCH" => Method::Patch,
             _ => panic!("Invalid method"),
         }
     }
@@ -35,7 +35,7 @@ pub enum Version {
     HTTP1_0,
     HTTP1_1,
     HTTP2_0,
-    UNKNOWN,
+    Unknown,
 }
 
 impl From<&str> for Version {
@@ -44,7 +44,7 @@ impl From<&str> for Version {
             "HTTP/1.0" => Version::HTTP1_0,
             "HTTP/1.1" => Version::HTTP1_1,
             "HTTP/2.0" => Version::HTTP2_0,
-            _ => Version::UNKNOWN,
+            _ => Version::Unknown,
         }
     }
 }
@@ -55,7 +55,7 @@ impl Display for Version {
             Version::HTTP1_0 => write!(f, "HTTP/1.0"),
             Version::HTTP1_1 => write!(f, "HTTP/1.1"),
             Version::HTTP2_0 => write!(f, "HTTP/2.0"),
-            Version::UNKNOWN => write!(f, "UNKNOWN"),
+            Version::Unknown => write!(f, "UNKNOWN"),
         }
     }
 }
@@ -64,8 +64,8 @@ impl Display for Version {
 pub struct Request {
     pub method: Method,
     pub path: String,
-    pub version: Version,
-    pub headers: HashMap<String, String>,
+    version: Version,
+    headers: HashMap<String, String>,
     pub body: Vec<u8>,
     pub params: HashMap<String, String>,
     pub query: HashMap<String, String>,
@@ -86,7 +86,7 @@ impl Request {
         let raw_str = String::from_utf8_lossy(raw);
 
         // Split into headers and body
-        let mut parts = raw_str.split("\r\n\r\n");
+        let mut parts = raw_str.splitn(2, "\r\n\r\n");
         let headers_part = parts.next().ok_or("Invalid request format")?;
         let body_part = parts.next().unwrap_or("");
 
@@ -100,36 +100,32 @@ impl Request {
         let version = request_parts.next().ok_or("Missing HTTP version")?;
 
         // Parse path and query parameters
-        let mut query = HashMap::new();
-        let path = if let Some(q_idx) = path_with_query.find('?') {
+        let (path, query) = if let Some(q_idx) = path_with_query.find('?') {
             let path = &path_with_query[..q_idx];
             let query_str = &path_with_query[q_idx + 1..];
-
-            // Parse query string
-            for pair in query_str.split('&') {
-                if let Some(eq_idx) = pair.find('=') {
-                    let key = pair[..eq_idx].to_string();
-                    let value = pair[eq_idx + 1..].to_string();
-                    query.insert(key, value);
-                } else if !pair.is_empty() {
-                    query.insert(pair.to_string(), "".to_string());
-                }
-            }
-
-            path.to_string()
+            let query = query_str
+                .split('&')
+                .filter_map(|pair| {
+                    let mut split = pair.splitn(2, '=');
+                    let key = split.next()?.to_string();
+                    let value = split.next().unwrap_or("").to_string();
+                    Some((key, value))
+                })
+                .collect();
+            (path.to_string(), query)
         } else {
-            path_with_query.to_string()
+            (path_with_query.to_string(), HashMap::new())
         };
 
         // Parse headers
-        let mut headers = HashMap::new();
-        for line in lines {
-            if let Some(colon_pos) = line.find(':') {
-                let key = line[..colon_pos].trim().to_string();
-                let value = line[colon_pos + 1..].trim().to_string();
-                headers.insert(key, value);
-            }
-        }
+        let headers = lines
+            .filter_map(|line| {
+                let mut split = line.splitn(2, ':');
+                let key = split.next()?.trim().to_string();
+                let value = split.next()?.trim().to_string();
+                Some((key, value))
+            })
+            .collect();
 
         Ok(Request {
             method: Method::from(method),
@@ -151,6 +147,7 @@ impl Request {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum StatusCode {
     OK = 200,
@@ -284,15 +281,15 @@ mod tests {
 
     #[test]
     fn test_method_from_str() {
-        assert_eq!(Method::from("GET"), Method::GET);
-        assert_eq!(Method::from("POST"), Method::POST);
-        assert_eq!(Method::from("PUT"), Method::PUT);
-        assert_eq!(Method::from("DELETE"), Method::DELETE);
-        assert_eq!(Method::from("HEAD"), Method::HEAD);
-        assert_eq!(Method::from("CONNECT"), Method::CONNECT);
-        assert_eq!(Method::from("OPTIONS"), Method::OPTIONS);
-        assert_eq!(Method::from("TRACE"), Method::TRACE);
-        assert_eq!(Method::from("PATCH"), Method::PATCH);
+        assert_eq!(Method::from("GET"), Method::Get);
+        assert_eq!(Method::from("POST"), Method::Post);
+        assert_eq!(Method::from("PUT"), Method::Put);
+        assert_eq!(Method::from("DELETE"), Method::Delete);
+        assert_eq!(Method::from("HEAD"), Method::Head);
+        assert_eq!(Method::from("CONNECT"), Method::Connect);
+        assert_eq!(Method::from("OPTIONS"), Method::Options);
+        assert_eq!(Method::from("TRACE"), Method::Trace);
+        assert_eq!(Method::from("PATCH"), Method::Patch);
     }
 
     #[test]
