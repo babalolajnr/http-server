@@ -1,6 +1,6 @@
 use std::task::{Context, Poll};
 
-use crate::http::{Request, Response};
+use crate::http::{request::Request, response::Response};
 
 /// A trait representing an asynchronous service.
 pub trait Service {

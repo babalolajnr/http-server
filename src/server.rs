@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use futures_executor::block_on;
 
-use crate::http::{Request, Response, StatusCode};
+use crate::http::parser::parse;
+use crate::http::{Response, StatusCode};
 use crate::router::Router;
 use crate::service::{Service, ServiceBuilder};
 
@@ -92,7 +93,7 @@ where
         }
 
         // Parse the request
-        let request = match Request::parse(&request_data) {
+        let request = match parse(&request_data) {
             Ok(req) => req,
             Err(e) => {
                 eprintln!("Failed to parse request: {}", e);

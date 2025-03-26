@@ -47,10 +47,10 @@ where
         println!(
             "Request: {} {}",
             match req.method {
-                Method::GET => "GET",
-                Method::POST => "POST",
-                Method::PUT => "PUT",
-                Method::DELETE => "DELETE",
+                Method::Get => "GET",
+                Method::Post => "POST",
+                Method::Put => "PUT",
+                Method::Delete => "DELETE",
                 _ => "OTHER",
             },
             req.path

@@ -199,7 +199,7 @@ impl Router {
         F: Fn(Request) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<Response, String>> + Send + 'static,
     {
-        self.route(pattern, Some(Method::GET), handler)
+        self.route(pattern, Some(Method::Get), handler)
     }
 
     /// Adds a POST route to the router.
@@ -219,7 +219,7 @@ impl Router {
         F: Fn(Request) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<Response, String>> + Send + 'static,
     {
-        self.route(pattern, Some(Method::POST), handler)
+        self.route(pattern, Some(Method::Post), handler)
     }
 
     /// Sets the not-found handler for the router.
